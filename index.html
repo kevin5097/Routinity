@@ -464,10 +464,15 @@ function totalLibCount() {
   return CATEGORIES.reduce((s,c) => s + (exLib[c]?.length ?? 0), 0);
 }
 
+// exercise_library.id는 숫자(bigint)인데, 화면 곳곳에서 onclick="...('${it.id}')"처럼
+// 문자열로 다루기 때문에, 불러오는 즉시 문자열로 통일해서 비교 버그를 막는다.
+const normId = row => { if (row && row.id != null) row.id = String(row.id); return row; };
+const normIds = rows => allRows(rows).map(normId);
+
 async function loadExerciseLibrary() {
   exLib = {}; CATEGORIES.forEach(c => exLib[c] = []);
-  const rows = await dbGet('exercise_library',
-    `profile_name=eq.${encodeURIComponent(curProfile)}&order=category,item_order`);
+  const rows = normIds(await dbGet('exercise_library',
+    `profile_name=eq.${encodeURIComponent(curProfile)}&order=category,item_order`));
   rows.forEach(r => { (exLib[r.category] = exLib[r.category] || []).push(r); });
 }
 
@@ -541,8 +546,8 @@ async function migrateOldRoutines() {
         item_order: ord,
       };
     });
-    const inserted = await dbPost('exercise_library', payload);
-    allRows(inserted).forEach(r => { (exLib[r.category] = exLib[r.category] || []).push(r); });
+    const inserted = normIds(await dbPost('exercise_library', payload));
+    inserted.forEach(r => { (exLib[r.category] = exLib[r.category] || []).push(r); });
     localStorage.setItem(flagKey,'1');
     showToast(`📦 기존 루틴 ${payload.length}개를 카테고리로 자동 분류했어요`, 'ok', 3000);
   } catch(e) {
@@ -660,10 +665,10 @@ async function addItem(cat, name, sets, unit) {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '저장 중…'; }
   try {
     const ord = (exLib[cat] ?? []).length;
-    const ni  = firstRow(await dbPost('exercise_library', {
+    const ni  = normId(firstRow(await dbPost('exercise_library', {
       profile_name: curProfile, category: cat, exercise_name: name,
       sets: parseInt(sets)||1, unit_value: unit, item_order: ord,
-    }));
+    })));
     if (!ni?.id) throw new Error('항목 저장 실패');
     (exLib[cat] = exLib[cat] || []).push(ni);
     addingCat = null;
@@ -1325,7 +1330,7 @@ async function loadDefaultPool(cat) {
       profile_name: curProfile, category: cat, exercise_name: it.e,
       sets: it.s, unit_value: it.u, item_order: startOrd + i,
     }));
-    const inserted = allRows(await dbPost('exercise_library', payload));
+    const inserted = normIds(await dbPost('exercise_library', payload));
     exLib[cat] = [...existing, ...inserted];
     showToast(`✅ ${cat} 기본 운동 ${inserted.length}개 추가됨`, 'ok');
   } catch(e) {
