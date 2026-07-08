@@ -159,6 +159,24 @@ html,body{background:var(--bg);color:var(--ink);min-height:100dvh;
 .vol-fill{height:100%;background:var(--red);border-radius:3px;}
 .vol-num{font-size:.7rem;color:var(--red);font-weight:700;width:38px;text-align:right;}
 
+/* ── 최근 훈련 일지 아코디언 ── */
+.sess-log-item{border:1px solid var(--line);border-radius:12px;margin-bottom:.38rem;overflow:hidden;}
+.sess-log-hdr{display:flex;align-items:center;gap:.6rem;padding:.65rem .8rem;cursor:pointer;background:var(--card);transition:.13s;-webkit-tap-highlight-color:transparent;}
+.sess-log-hdr:active{background:rgba(255,255,255,.1);}
+.sess-log-date{font-size:.82rem;font-weight:700;flex:1;}
+.sess-log-meta{font-size:.65rem;color:var(--ink3);white-space:nowrap;}
+.sess-log-chev{font-size:.65rem;color:var(--ink3);transition:.2s;flex-shrink:0;}
+.sess-log-item.open .sess-log-chev{transform:rotate(180deg);}
+.sess-log-body{display:none;padding:.5rem .8rem .65rem;border-top:1px solid var(--line);}
+.sess-log-item.open .sess-log-body{display:block;}
+.sess-ex-row{display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.sess-ex-row:last-child{border-bottom:none;}
+.sess-ex-check{width:16px;height:16px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.6rem;border:1.5px solid rgba(255,255,255,.15);}
+.sess-ex-check.done{background:var(--green);border-color:var(--green);color:#0b1120;}
+.sess-ex-name{flex:1;font-size:.79rem;font-weight:600;}
+.sess-ex-name.done{text-decoration:line-through;color:var(--ink3);font-weight:400;}
+.sess-ex-info{font-size:.65rem;color:var(--ink3);white-space:nowrap;}
+
 /* ── 카테고리 탭 / 관리 ── */
 .day-tabs{display:flex;gap:.3rem;overflow-x:auto;padding:.4rem 0 .3rem;
   -webkit-overflow-scrolling:touch;scrollbar-width:none;}
@@ -1019,11 +1037,60 @@ async function renderStats() {
       h += `</div>`;
     }
 
+    /* 📋 최근 훈련 일지 */
+    const recentSess = await dbGet('training_sessions', `${pf}&order=session_date.desc&limit=10`);
+    if (recentSess.length) {
+      const rIds = recentSess.map(s=>s.id).join(',');
+      const recentItems = await dbGet('session_items', `session_id=in.(${rIds})&order=item_order`);
+      const itemsBySess = {};
+      recentItems.forEach(it => {
+        if (!itemsBySess[it.session_id]) itemsBySess[it.session_id] = [];
+        itemsBySess[it.session_id].push(it);
+      });
+      const WD = ['일','월','화','수','목','금','토'];
+      h += `<div class="card"><div class="card-title">📋 최근 훈련 일지</div>`;
+      recentSess.forEach(s => {
+        const d = new Date(s.session_date+'T00:00:00');
+        const dateLabel = `${s.session_date.slice(5).replace('-','/')} (${WD[d.getDay()]})`;
+        const items = itemsBySess[s.id] || [];
+        const done = items.filter(x=>x.completed).length;
+        const total = items.length;
+        const pct = total ? Math.round(done/total*100) : 0;
+        const isToday = s.session_date === todayStr;
+        h += `<div class="sess-log-item" id="sli-${s.id}">
+          <div class="sess-log-hdr" onclick="toggleSessLog('${s.id}')">
+            <div class="sess-log-date">${isToday?'🟢 오늘 · ':''}${dateLabel}</div>
+            <div class="sess-log-meta">${done}/${total}개 · ${pct}%</div>
+            <div class="sess-log-chev">▼</div>
+          </div>
+          <div class="sess-log-body">`;
+        if (!items.length) {
+          h += `<div style="font-size:.75rem;color:var(--ink3);text-align:center;padding:.3rem 0">항목 없음</div>`;
+        } else {
+          items.forEach(it => {
+            const kg = it.weight_kg != null ? ` · ${it.weight_kg}kg` : '';
+            const dn = it.completed ? ' done' : '';
+            h += `<div class="sess-ex-row">
+              <div class="sess-ex-check${dn}">${it.completed?'✓':''}</div>
+              <div class="sess-ex-name${dn}">${it.exercise_name}</div>
+              <div class="sess-ex-info">${it.sets_planned||''}세트${kg}</div>
+            </div>`;
+          });
+        }
+        h += `</div></div>`;
+      });
+      h += `</div>`;
+    }
+
     el.innerHTML = h;
   } catch(e) {
     console.error('stats', e);
     el.innerHTML = `<div class="empty"><p>데이터를 불러오지 못했어요.</p></div>`;
   }
+}
+
+function toggleSessLog(id) {
+  document.getElementById('sli-'+id).classList.toggle('open');
 }
 
 /* ── 카테고리 관리 (구 '루틴' 탭) ── */
