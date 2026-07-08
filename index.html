@@ -232,6 +232,19 @@ html,body{background:var(--bg);color:var(--ink);min-height:100dvh;
 .w-hist{font-size:.62rem;color:var(--ink3);padding:.1rem .3rem;
   border-radius:5px;background:rgba(255,255,255,.04);white-space:nowrap;}
 
+/* ── 실제 수행 입력 ── */
+.actual-chip{display:inline-flex;align-items:center;gap:.2rem;
+  background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.22);
+  border-radius:6px;padding:.08rem .32rem;cursor:text;flex-shrink:0;}
+.actual-chip .ai{width:34px;background:transparent;border:none;
+  color:var(--green);font-size:.73rem;font-weight:700;text-align:center;
+  outline:none;padding:0;}
+.actual-chip .ai::placeholder{color:rgba(74,222,128,.28);}
+.actual-chip .al{font-size:.6rem;color:var(--green);opacity:.8;white-space:nowrap;}
+.plan-label{font-size:.57rem;color:var(--ink3);letter-spacing:.01em;margin-right:.08rem;}
+.actual-badge{font-size:.62rem;color:var(--green);padding:.1rem .3rem;
+  border-radius:5px;background:rgba(74,222,128,.08);white-space:nowrap;}
+
 /* ── Preset button ── */
 .preset-btn{display:flex;align-items:center;justify-content:center;gap:.45rem;
   width:100%;padding:.7rem;margin-top:1rem;
@@ -650,6 +663,18 @@ async function saveWeight(id, val) {
   catch(e) { console.error('saveWeight', e); }
 }
 
+async function saveActual(id, field, val) {
+  const num = val === '' ? null : (parseFloat(val) || null);
+  const it = sessItems.find(x => x.id === id);
+  if (it) it[field] = num;
+  try { await dbPatch('session_items', `id=eq.${id}`, { [field]: num }); }
+  catch(e) { console.error('saveActual', e); }
+}
+
+function unitSuffix(uv) {
+  return (String(uv||'').replace(/[\d.]+/g,'').trim()) || '회';
+}
+
 async function finishSession() {
   if (!todaySession) return;
   todaySession.is_finished = true;
@@ -800,13 +825,16 @@ function renderToday() {
       sessItems.forEach(it => {
         const wVal = it.weight_kg ?? '';
         const restHint = getRestHint(it.exercise_name);
+        const uSfx = unitSuffix(it.unit_value);
+        const aSetVal = it.actual_sets ?? '';
+        const aRepVal = it.actual_reps ?? '';
         h += `<div class="check-item${it.completed?' done':''}" onclick="toggleItem('${it.id}')">
           <div class="ci-box">${it.completed?'✓':''}</div>
           <div class="ci-body">
             <div class="ci-top">
               <div class="ci-name">${it.exercise_name}</div>
               <div class="ci-right">
-                <span class="ci-amt">${it.sets_planned}세트 × ${it.unit_value}</span>
+                <span class="ci-amt"><span class="plan-label">계획</span>${it.sets_planned}세트 × ${it.unit_value}</span>
                 ${ytBtn(it.exercise_name)}
               </div>
             </div>
@@ -817,6 +845,15 @@ function renderToday() {
                   onchange="saveWeight('${it.id}', this.value)"
                   onfocus="this.select()"/>
                 <span class="wl">kg</span>
+              </div>
+              <div class="actual-chip">
+                <span class="al">실제</span>
+                <input class="ai" type="number" min="0" step="1" placeholder="—" value="${aSetVal}"
+                  onchange="saveActual('${it.id}','actual_sets',this.value)" onfocus="this.select()"/>
+                <span class="al">세트 ×</span>
+                <input class="ai" type="number" min="0" step="1" placeholder="—" value="${aRepVal}"
+                  onchange="saveActual('${it.id}','actual_reps',this.value)" onfocus="this.select()"/>
+                <span class="al">${uSfx}</span>
               </div>
               ${restHint}
             </div>
@@ -838,18 +875,22 @@ function renderToday() {
   if (sessItems.length) {
     h += `<div class="card"><div class="card-title">오늘 운동 목록</div>`;
     sessItems.forEach(it => {
-      const wBadge = it.weight_kg
-        ? `<span class="w-hist">🏋️ ${it.weight_kg}kg</span>` : '';
+      const uSfx = unitSuffix(it.unit_value);
+      const wBadge = it.weight_kg != null ? `<span class="w-hist">🏋️ ${it.weight_kg}kg</span>` : '';
+      const hasActual = it.actual_sets != null || it.actual_reps != null;
+      const actualBadge = hasActual
+        ? `<span class="actual-badge">✅ ${it.actual_sets??'?'}세트 × ${it.actual_reps??'?'}${uSfx}</span>` : '';
       h += `<div class="check-item${it.completed?' done':''}" style="cursor:default;pointer-events:none;">
         <div class="ci-box">${it.completed?'✓':''}</div>
         <div class="ci-body">
           <div class="ci-top">
             <div class="ci-name">${it.exercise_name}</div>
             <div class="ci-right">
-              <span class="ci-amt">${it.sets_planned}세트 × ${it.unit_value}</span>
+              <span class="ci-amt"><span class="plan-label">계획</span>${it.sets_planned}세트 × ${it.unit_value}</span>
               ${wBadge}
             </div>
           </div>
+          ${hasActual ? `<div class="ci-bottom" style="margin-top:.2rem;">${actualBadge}</div>` : ''}
         </div>
       </div>`;
     });
@@ -1068,12 +1109,16 @@ async function renderStats() {
           h += `<div style="font-size:.75rem;color:var(--ink3);text-align:center;padding:.3rem 0">항목 없음</div>`;
         } else {
           items.forEach(it => {
+            const uSfx = unitSuffix(it.unit_value);
             const kg = it.weight_kg != null ? ` · ${it.weight_kg}kg` : '';
             const dn = it.completed ? ' done' : '';
+            const hasActual = it.actual_sets != null || it.actual_reps != null;
+            const actualStr = hasActual
+              ? ` <span style="color:var(--green);font-weight:700;">(실제 ${it.actual_sets??'?'}×${it.actual_reps??'?'}${uSfx})</span>` : '';
             h += `<div class="sess-ex-row">
               <div class="sess-ex-check${dn}">${it.completed?'✓':''}</div>
               <div class="sess-ex-name${dn}">${it.exercise_name}</div>
-              <div class="sess-ex-info">${it.sets_planned||''}세트${kg}</div>
+              <div class="sess-ex-info">${it.sets_planned||''}세트 × ${it.unit_value}${kg}${actualStr}</div>
             </div>`;
           });
         }
