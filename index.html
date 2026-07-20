@@ -159,6 +159,27 @@ html,body{background:var(--bg);color:var(--ink);min-height:100dvh;
 .vol-fill{height:100%;background:var(--red);border-radius:3px;}
 .vol-num{font-size:.7rem;color:var(--red);font-weight:700;width:38px;text-align:right;}
 
+/* ── 채원 주간 스케줄 ── */
+.cw-week{display:flex;gap:.28rem;margin:.6rem 0 1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.cw-week::-webkit-scrollbar{display:none;}
+.cw-day{flex:1;min-width:42px;border-radius:12px;padding:.5rem .2rem;text-align:center;border:1.5px solid var(--line);background:var(--card);cursor:default;}
+.cw-day.today{border-color:var(--green);background:rgba(74,222,128,.1);}
+.cw-day.rest{opacity:.4;}
+.cw-dn{font-size:.58rem;color:var(--ink3);margin-bottom:.2rem;font-weight:700;}
+.cw-day.today .cw-dn{color:var(--green);}
+.cw-emoji{font-size:1.05rem;line-height:1.2;}
+.cw-dlabel{font-size:.52rem;color:var(--ink3);margin-top:.18rem;line-height:1.3;word-break:keep-all;}
+.cw-day.today .cw-dlabel{color:var(--green);font-weight:700;}
+.cw-day.selected:not(.today){border-color:var(--blue);background:rgba(56,189,248,.1);}
+.cw-day.selected:not(.today) .cw-dn{color:var(--blue);}
+.cw-day.selected:not(.today) .cw-dlabel{color:var(--blue);font-weight:700;}
+.cw-ex-preview{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:.8rem .9rem;margin-bottom:.8rem;}
+.cw-ex-row{display:flex;align-items:center;gap:.5rem;padding:.28rem 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.cw-ex-row:last-child{border-bottom:none;}
+.cw-ex-num{width:18px;height:18px;border-radius:50%;background:rgba(74,222,128,.15);color:var(--green);font-size:.62rem;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.cw-ex-name{flex:1;font-size:.82rem;font-weight:600;}
+.cw-ex-amt{font-size:.65rem;color:var(--ink3);}
+
 /* ── 최근 훈련 일지 아코디언 ── */
 .sess-log-item{border:1px solid var(--line);border-radius:12px;margin-bottom:.38rem;overflow:hidden;}
 .sess-log-hdr{display:flex;align-items:center;gap:.6rem;padding:.65rem .8rem;cursor:pointer;background:var(--card);transition:.13s;-webkit-tap-highlight-color:transparent;}
@@ -337,6 +358,11 @@ html,body{background:var(--bg);color:var(--ink);min-height:100dvh;
       <div class="pp-name">미희</div>
       <div class="pp-desc">맨몸 운동<br/>체중감량</div>
     </div>
+    <div class="pp-card" id="ppCard채원" onclick="pickProfile('채원')">
+      <div class="pp-avatar">🌱</div>
+      <div class="pp-name">채원</div>
+      <div class="pp-desc">홈트 · 성장<br/>키크는 운동</div>
+    </div>
   </div>
   <button class="pp-enter" id="ppEnter" onclick="enterApp()">시작하기 →</button>
 </div>
@@ -386,6 +412,7 @@ const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.
 const PROFILES = {
   '봉결': { av:'🥊', desc:'복싱·농구·스트렝스' },
   '미희':  { av:'🏃‍♀️', desc:'맨몸·체중감량' },
+  '채원':  { av:'🌱', desc:'홈트·성장·키크는운동' },
 };
 let curProfile = localStorage.getItem('boxing_profile') || '';
 let pendingProfile = '';
@@ -459,11 +486,12 @@ async function dbDelete(tbl, q) {
 }
 
 /* ══ CATEGORIES ══ */
-const CATEGORIES = ['하체','상체','플라이오','복싱','농구 경기','농구 훈련'];
-const CAT_ICON = { '하체':'🦵','상체':'💪','플라이오':'🤾','복싱':'🥊','농구 경기':'🏀','농구 훈련':'🎯' };
+const CATEGORIES = ['하체(월)','상체(화)','플라이오(금)','농구 훈련'];
+const CAT_ICON = { '하체(월)':'🦵','상체(화)':'💪','플라이오(금)':'🤾','농구 훈련':'🎯' };
 
 /* ══ STATE ══ */
 let curTab       = 'today';
+let chaewonViewDay = -1; // -1 = 오늘(todayDow) 기본값
 let selCat       = CATEGORIES[0];   // active category in category manager
 let addingCat    = null;            // which category is showing add form
 let exLib        = {};              // category → exercise_library rows[]
@@ -788,6 +816,11 @@ function renderToday() {
 
   /* 세션 없음 — 카테고리/운동 선택 플로우 */
   if (!todaySession) {
+    /* 채원: 고정 주간 스케줄 */
+    if (curProfile === '채원') {
+      h += renderChaewonSchedule();
+      el.innerHTML = h; return;
+    }
     if (pickStage === 'cats') {
       h += renderCatPickStage();
       el.innerHTML = h; return;
@@ -799,11 +832,6 @@ function renderToday() {
     h += `<div class="empty">
       <div class="ei">🤔</div>
       <p>오늘 어떤 운동을 할지 골라볼까요?</p>
-      <p>월요일 : 하체 + 복싱 </p>
-      <p>화요일 : 상체 + 복싱 </p>
-      <p>수요일 : 농구훈련 + 복싱</p>
-      <p>목요일 : 농구</p>
-      <p>금요일 : 플라이오 + 복싱 </p>
     </div>
     <button class="start-btn" onclick="openCategoryPicker()">오늘 운동 고르기</button>`;
     el.innerHTML = h; return;
@@ -1356,7 +1384,7 @@ function ytBtn(name) {
 /* ══ 카테고리별 기본 운동 풀 (운동 풀이 비어있을 때 '기본 운동 추가' 버튼에서 사용) ══ */
 const DEFAULT_POOLS = {
   '봉결': {
-    '하체': [
+    '하체(월)': [
       { e:'바벨 스쿼트',            s:4, u:'6회'  },
       { e:'케틀벨 스윙',            s:3, u:'15회' },
       { e:'데드리프트',             s:4, u:'5회'  },
@@ -1364,7 +1392,7 @@ const DEFAULT_POOLS = {
       { e:'플랭크',                 s:3, u:'1분'  },
       { e:'레그레이즈',             s:3, u:'15회' },
     ],
-    '상체': [
+    '상체(화)': [
       { e:'푸시 프레스',            s:4, u:'6회'  },
       { e:'벤치프레스',             s:4, u:'6회'  },
       { e:'풀업 (친업)',            s:4, u:'8회'  },
@@ -1372,29 +1400,13 @@ const DEFAULT_POOLS = {
       { e:'복근운동 (크런치)',       s:3, u:'20회' },
       { e:'케이블 로테이션',        s:3, u:'15회' },
     ],
-    '플라이오': [
+    '플라이오(금)': [
       { e:'박스 점프',              s:4, u:'8회'  },
       { e:'스쿼트 점프',            s:3, u:'10회' },
       { e:'버피 점프',              s:3, u:'10회' },
       { e:'버피',                   s:3, u:'10회' },
       { e:'배틀로프',               s:3, u:'30초' },
       { e:'사이드 스텝 드릴',       s:3, u:'2분'  },
-    ],
-    '복싱': [
-      { e:'줄넘기 (워밍업)',        s:3, u:'3분'  },
-      { e:'쉐도우복싱',             s:4, u:'3분'  },
-      { e:'샌드백',                 s:4, u:'2분'  },
-      { e:'샌드백 (콤비네이션)',    s:5, u:'3분'  },
-      { e:'런닝머신 스프린트 인터벌', s:8, u:'20초 전력+40초 걷기' },
-      { e:'코어 (레그레이즈)',      s:3, u:'15회' },
-    ],
-    '농구 경기': [
-      { e:'동적 스트레칭 (워밍업)', s:1, u:'8분'  },
-      { e:'줄넘기 (활성화)',        s:2, u:'3분'  },
-      { e:'드리블 핸들링 드릴',     s:2, u:'5분'  },
-      { e:'슈팅 웜업 (캐치&슛)',   s:3, u:'15회' },
-      { e:'레이업 웜업',            s:2, u:'20회' },
-      { e:'쿨다운 스트레칭',        s:1, u:'10분' },
     ],
     '농구 훈련': [
       { e:'동적 스트레칭 (워밍업)', s:1, u:'8분'  },
@@ -1406,7 +1418,7 @@ const DEFAULT_POOLS = {
     ],
   },
   '미희': {
-    '하체': [
+    '하체(월)': [
       { e:'스쿼트',                  s:3, u:'15회' },
       { e:'리버스 런지',             s:3, u:'12회' },
       { e:'힙브릿지',                s:3, u:'20회' },
@@ -1421,19 +1433,176 @@ const DEFAULT_POOLS = {
       { e:'바이시클 크런치',         s:3, u:'20회' },
       { e:'크런치',                  s:3, u:'20회' },
     ],
-    '상체': [
+    '상체(화)': [
       { e:'수퍼맨',                  s:3, u:'12회' },
     ],
-    '플라이오': [
+    '플라이오(금)': [
       { e:'점핑잭',                  s:3, u:'40초' },
       { e:'무릎 높이 달리기',        s:3, u:'30초' },
       { e:'스쿼트 점프 (저충격)',    s:3, u:'10회' },
     ],
-    '복싱': [],
-    '농구 경기': [],
     '농구 훈련': [],
   },
+  '채원': {
+    '하체(월)': [
+      { e:'줄넘기',                  s:3, u:'3분'  },  // 성장판 자극 최고
+      { e:'스쿼트 점프',             s:3, u:'10회' },  // 점프 → 성장판 자극
+      { e:'런지',                    s:3, u:'12회' },
+      { e:'카프레이즈 (까치발)',      s:3, u:'20회' },  // 종아리·하체 성장 자극
+      { e:'스쿼트',                  s:3, u:'15회' },
+      { e:'글루트 브릿지',           s:3, u:'15회' },
+    ],
+    '상체(화)': [
+      { e:'턱걸이 (매달리기)',        s:3, u:'최대'  }, // 척추 이완 + 상체 성장
+      { e:'턱걸이',                  s:3, u:'5회'  },
+      { e:'푸시업',                  s:3, u:'10회' },
+      { e:'덤벨 숄더 프레스',        s:3, u:'10회' },
+      { e:'덤벨 로우',               s:3, u:'12회' },
+      { e:'슈퍼맨 (척추 신전)',      s:3, u:'12회' },  // 척추 강화·늘리기
+    ],
+    '플라이오(금)': [
+      { e:'줄넘기 (이중 점프)',       s:4, u:'2분'  },  // 성장판 자극
+      { e:'박스 점프',               s:3, u:'8회'  },
+      { e:'버피',                    s:3, u:'8회'  },
+      { e:'스타 점프',               s:3, u:'10회' },
+      { e:'배틀로프 (케틀벨 스윙)',  s:3, u:'20회' },
+    ],
+    '농구 훈련': [
+      { e:'줄넘기 (워밍업)',         s:2, u:'3분'  },
+      { e:'코브라 스트레칭',         s:3, u:'30초' },  // 척추 이완·신장
+      { e:'고양이·소 스트레칭',      s:3, u:'10회' },  // 척추 유연성
+      { e:'척추 비틀기 스트레칭',    s:2, u:'30초' },
+      { e:'어깨·등 스트레칭',        s:2, u:'30초' },
+      { e:'매달리기 (철봉)',          s:3, u:'30초' },  // 척추 감압·키 자극
+    ],
+  },
 };
+
+/* ══ 채원 고정 주간 스케줄 ══ */
+const CHAEWON_SCHEDULE = {
+  1: { label:'하체의 날', emoji:'🦵', items:[
+    { e:'제자리 높이 점프',         s:3, u:'10회' },  // 수직으로 최대한 높이 — 성장판 자극
+    { e:'스쿼트 점프',             s:3, u:'10회' },
+    { e:'런지',                    s:3, u:'12회' },
+    { e:'카프레이즈 (까치발)',      s:3, u:'20회' },
+    { e:'스쿼트',                  s:3, u:'15회' },
+    { e:'글루트 브릿지',           s:3, u:'15회' },
+  ]},
+  2: { label:'상체의 날', emoji:'💪', items:[
+    { e:'매달리기 (철봉)',          s:3, u:'30초' },
+    { e:'턱걸이',                  s:3, u:'5회'  },
+    { e:'푸시업',                  s:3, u:'10회' },
+    { e:'파이크 푸시업',           s:3, u:'8회'  },  // 어깨 타깃 — 엉덩이 높이 들고 팔 굽히기
+    { e:'테이블 로우',             s:3, u:'10회' },  // 탁자 밑 누워 가장자리 잡고 당기기
+    { e:'슈퍼맨 (척추 신전)',      s:3, u:'12회' },
+  ]},
+  3: { label:'스트레칭의 날', emoji:'🧘', items:[
+    { e:'점핑잭 (워밍업)',          s:2, u:'30회' },  // 소음 적고 실내 가능
+    { e:'코브라 스트레칭',          s:3, u:'30초' },
+    { e:'고양이·소 스트레칭',       s:3, u:'10회' },
+    { e:'척추 비틀기 스트레칭',     s:2, u:'30초' },
+    { e:'어깨·등 스트레칭',         s:2, u:'30초' },
+    { e:'매달리기 (철봉)',           s:3, u:'30초' },
+  ]},
+  4: { label:'하체 반복', emoji:'🦵', items:[
+    { e:'제자리 높이 점프',         s:4, u:'10회' },  // 수직 점프 — 키 성장에 최고
+    { e:'불가리안 스플릿 스쿼트',  s:3, u:'10회' },
+    { e:'카프레이즈 (까치발)',      s:3, u:'25회' },
+    { e:'스쿼트 점프',             s:3, u:'12회' },
+    { e:'플랭크',                  s:3, u:'30초' },
+    { e:'레그레이즈',              s:3, u:'15회' },
+  ]},
+  5: { label:'플라이오의 날', emoji:'⚡', items:[
+    { e:'제자리 높이 점프',         s:4, u:'10회' },  // 최대 높이로 — 줄넘기 대체
+    { e:'브로드 점프',             s:3, u:'8회'  },  // 앞으로 최대한 멀리 뛰기
+    { e:'버피',                    s:3, u:'8회'  },
+    { e:'스타 점프',               s:3, u:'10회' },
+    { e:'카프레이즈 (까치발)',      s:3, u:'20회' },
+  ]},
+  6: null, // 토 휴식
+  0: null, // 일 휴식
+};
+
+function renderChaewonSchedule() {
+  const WD = ['일','월','화','수','목','금','토'];
+  const viewDow = chaewonViewDay < 0 ? todayDow : chaewonViewDay;
+  const sched = CHAEWON_SCHEDULE[viewDow];
+  const isViewingToday = viewDow === todayDow;
+  let h = '';
+
+  // 주간 스케줄 스트립 (클릭 가능)
+  h += `<div class="card"><div class="card-title">🌱 채원의 주간 홈트 루틴</div>
+    <div class="cw-week">`;
+  [1,2,3,4,5,6,0].forEach(dow => {
+    const s = CHAEWON_SCHEDULE[dow];
+    const isToday = dow === todayDow;
+    const isSelected = dow === viewDow;
+    const isRest = !s;
+    h += `<div class="cw-day${isToday?' today':''}${isSelected?' selected':''}${isRest?' rest':''}"
+        onclick="setChaewonDay(${dow})" style="cursor:pointer;">
+      <div class="cw-dn">${WD[dow]}</div>
+      <div class="cw-emoji">${isRest ? '😴' : s.emoji}</div>
+      <div class="cw-dlabel">${isRest ? '휴식' : s.label}</div>
+    </div>`;
+  });
+  h += `</div></div>`;
+
+  // 선택된 날 미리보기
+  if (!sched) {
+    h += `<div class="done-banner">
+      <div class="done-emoji">😴</div>
+      <div class="done-title">${isViewingToday ? '오늘은' : WD[viewDow]+'요일은'} 휴식의 날!</div>
+      <div class="done-sub">잘 쉬어야 키도 쑥쑥 자라요 🌙</div>
+    </div>`;
+    return h;
+  }
+
+  const dayLabel = isViewingToday ? '오늘의 운동' : WD[viewDow]+'요일 운동';
+  h += `<div class="cw-ex-preview">
+    <div class="card-title" style="margin-bottom:.6rem">${sched.emoji} ${dayLabel} · ${sched.label}</div>`;
+  sched.items.forEach((it, i) => {
+    h += `<div class="cw-ex-row">
+      <div class="cw-ex-num">${i+1}</div>
+      <div class="cw-ex-name">${it.e}</div>
+      <div class="cw-ex-amt">${it.s}세트 × ${it.u}</div>
+    </div>`;
+  });
+  h += `</div>`;
+
+  if (isViewingToday) {
+    h += `<button class="start-btn" onclick="startChaewonSession()">${sched.emoji} 오늘 운동 시작!</button>`;
+  }
+  return h;
+}
+
+function setChaewonDay(dow) {
+  chaewonViewDay = dow;
+  renderAll();
+}
+
+async function startChaewonSession() {
+  const sched = CHAEWON_SCHEDULE[todayDow];
+  if (!sched) return;
+  try {
+    const sess = firstRow(await dbPost('training_sessions', {
+      session_date: todayStr, routine_id: null,
+      is_finished: false, profile_name: curProfile,
+      categories: sched.label,
+    }));
+    todaySession = sess;
+    const bulk = sched.items.map((it, i) => ({
+      session_id: todaySession.id, routine_item_id: null,
+      exercise_name: it.e, sets_planned: it.s,
+      unit_value: it.u, completed: false, item_order: i,
+    }));
+    sessItems = allRows(await dbPost('session_items', bulk))
+      .sort((a,b) => (a.item_order||0) - (b.item_order||0));
+    renderAll();
+  } catch(e) {
+    console.error('startChaewonSession', e);
+    showToast('❌ 훈련 시작 실패: ' + e.message, 'err', 4000);
+  }
+}
 
 async function loadDefaultPool(cat) {
   const pool = (DEFAULT_POOLS[curProfile] || DEFAULT_POOLS['봉결'])[cat] || [];
