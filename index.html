@@ -159,6 +159,34 @@ html,body{background:var(--bg);color:var(--ink);min-height:100dvh;
 .vol-fill{height:100%;background:var(--red);border-radius:3px;}
 .vol-num{font-size:.7rem;color:var(--red);font-weight:700;width:38px;text-align:right;}
 
+/* ── 카테고리 관리 모달 ── */
+.cat-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:50;
+  display:none;align-items:flex-end;justify-content:center;}
+.cat-modal-overlay.open{display:flex;}
+.cat-modal{background:#1e293b;border-radius:20px 20px 0 0;padding:1.3rem 1rem 2rem;
+  width:100%;max-width:480px;max-height:85vh;overflow-y:auto;}
+.cat-modal h4{font-size:1rem;font-weight:800;text-align:center;margin-bottom:1rem;}
+.cat-modal-label{font-size:.68rem;color:var(--ink3);font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;margin-bottom:.35rem;}
+.cat-modal-inp{width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;padding:.55rem .75rem;color:var(--ink);font-size:.9rem;outline:none;
+  margin-bottom:.9rem;}
+.cat-modal-inp:focus{border-color:rgba(239,68,68,.5);}
+.emoji-grid{display:flex;flex-wrap:wrap;gap:.38rem;margin-bottom:1rem;}
+.emoji-btn{width:42px;height:42px;border-radius:10px;border:2px solid transparent;
+  background:rgba(255,255,255,.05);font-size:1.25rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:.12s;}
+.emoji-btn.sel{border-color:var(--red);background:rgba(239,68,68,.15);}
+.cat-modal-actions{display:flex;gap:.45rem;margin-top:.3rem;}
+.cat-modal-actions button{flex:1;padding:.65rem;border-radius:10px;border:none;
+  font-size:.82rem;font-weight:700;cursor:pointer;transition:.13s;}
+.cma-save{background:var(--red);color:#fff;}
+.cma-del{background:rgba(248,113,113,.12);color:#f87171;}
+.cma-cancel{background:rgba(255,255,255,.07);color:var(--ink3);}
+.dtab-edit{font-size:.65rem;margin-left:.3rem;opacity:.45;cursor:pointer;
+  padding:.05rem .2rem;border-radius:4px;transition:.12s;}
+.dtab-edit:hover{opacity:1;background:rgba(255,255,255,.1);}
+
 /* ── 채원 주간 스케줄 ── */
 .cw-week{display:flex;gap:.28rem;margin:.6rem 0 1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
 .cw-week::-webkit-scrollbar{display:none;}
@@ -369,6 +397,22 @@ html,body{background:var(--bg);color:var(--ink);min-height:100dvh;
 
 <div id="toast"></div>
 
+<!-- 카테고리 추가/수정 모달 -->
+<div class="cat-modal-overlay" id="catModalOverlay" onclick="closeCatModal(event)">
+  <div class="cat-modal">
+    <h4 id="catModalTitle">카테고리 추가</h4>
+    <div class="cat-modal-label">이모지</div>
+    <div class="emoji-grid" id="catEmojiGrid"></div>
+    <div class="cat-modal-label">이름</div>
+    <input class="cat-modal-inp" id="catNameInp" type="text" placeholder="예: 유산소, 코어, 스트레칭"/>
+    <div class="cat-modal-actions">
+      <button class="cma-cancel" onclick="closeCatModal()">취소</button>
+      <button class="cma-del" id="catDelBtn" onclick="deleteCat()" style="display:none">삭제</button>
+      <button class="cma-save" id="catSaveBtn" onclick="saveCat()">저장</button>
+    </div>
+  </div>
+</div>
+
 <div id="app">
   <div class="topbar">
     <div>
@@ -485,14 +529,20 @@ async function dbDelete(tbl, q) {
   }
 }
 
-/* ══ CATEGORIES ══ */
-const CATEGORIES = ['하체(월)','상체(화)','플라이오(금)','농구 훈련'];
-const CAT_ICON = { '하체(월)':'🦵','상체(화)':'💪','플라이오(금)':'🤾','농구 훈련':'🎯' };
+/* ══ CATEGORIES (동적) ══ */
+let userCategories = []; // [{id, profile_name, name, emoji, item_order}]
+let editingCatId   = null;
+let selCatEmoji    = '🏋️';
+const CAT_EMOJI_PRESETS = ['🦵','💪','🤾','🎯','🥊','🏀','🧘','⚡','🏋️','🤸','🏃','🚴','🧗','🏊','🥋','⚽','🎾','🔥','🌟','💥'];
+const DEFAULT_CAT_EMOJI = {'하체(월)':'🦵','상체(화)':'💪','펑션트레이닝(수)':'⚡','농구훈련(목)':'🏀','플라이오(금)':'🤾'};
+function getCatNames() { return userCategories.map(c => c.name); }
+function getCatIcon(name) { return userCategories.find(c => c.name === name)?.emoji || '🏋️'; }
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 
 /* ══ STATE ══ */
 let curTab       = 'today';
 let chaewonViewDay = -1; // -1 = 오늘(todayDow) 기본값
-let selCat       = CATEGORIES[0];   // active category in category manager
+let selCat       = '';   // 카테고리 로드 후 첫 번째로 설정됨
 let addingCat    = null;            // which category is showing add form
 let exLib        = {};              // category → exercise_library rows[]
 let todaySession = null;            // training_sessions row
@@ -510,6 +560,7 @@ async function loadAll() {
   exLib = {}; todaySession = null; sessItems = [];
   pickStage = null; pickedCats = new Set(); pickerPool = []; pickedExIds = new Set();
   try {
+    await loadCategories();
     await loadExerciseLibrary();
     if (totalLibCount() === 0) {
       await migrateOldRoutines();
@@ -519,8 +570,32 @@ async function loadAll() {
   renderAll();
 }
 
+async function loadCategories() {
+  const pf = `profile_name=eq.${encodeURIComponent(curProfile)}`;
+  const rows = await dbGet('categories', `${pf}&order=item_order`);
+  if (rows.length) {
+    userCategories = rows;
+  } else {
+    // exercise_library의 distinct category로 초기화, 없으면 기본값 사용
+    const exRows = await dbGet('exercise_library', `${pf}&order=category`);
+    const names = [...new Set(exRows.map(r => r.category))].filter(Boolean);
+    const defaults = names.length ? names : ['하체(월)','상체(화)','펑션트레이닝(수)','농구훈련(목)','플라이오(금)'];
+    const toInsert = defaults.map((name, i) => ({
+      id: uid(), profile_name: curProfile, name,
+      emoji: DEFAULT_CAT_EMOJI[name] || '🏋️', item_order: i,
+    }));
+    for (const c of toInsert) {
+      try { await dbPost('categories', c); } catch(e) { console.error('initCat', e); }
+    }
+    userCategories = toInsert;
+  }
+  if (!selCat || !getCatNames().includes(selCat)) {
+    selCat = getCatNames()[0] || '';
+  }
+}
+
 function totalLibCount() {
-  return CATEGORIES.reduce((s,c) => s + (exLib[c]?.length ?? 0), 0);
+  return getCatNames().reduce((s,c) => s + (exLib[c]?.length ?? 0), 0);
 }
 
 // exercise_library.id는 숫자(bigint)인데, 화면 곳곳에서 onclick="...('${it.id}')"처럼
@@ -529,7 +604,7 @@ const normId = row => { if (row && row.id != null) row.id = String(row.id); retu
 const normIds = rows => allRows(rows).map(normId);
 
 async function loadExerciseLibrary() {
-  exLib = {}; CATEGORIES.forEach(c => exLib[c] = []);
+  exLib = {}; getCatNames().forEach(c => exLib[c] = []);
   const rows = normIds(await dbGet('exercise_library',
     `profile_name=eq.${encodeURIComponent(curProfile)}&order=category,item_order`));
   rows.forEach(r => { (exLib[r.category] = exLib[r.category] || []).push(r); });
@@ -545,12 +620,12 @@ async function loadTodaySession() {
 
 /* ══ 기존 요일 루틴 → 카테고리 자동 분류 마이그레이션 ══ */
 const CATEGORY_KEYWORDS = [
-  ['플라이오', ['박스 점프','스쿼트 점프','버피','배틀로프','점핑잭','사이드 스텝 드릴','스프린트 인터벌','런닝머신']],
-  ['복싱',     ['쉐도우복싱','샌드백','미트','스파링','줄넘기']],
-  ['상체',     ['푸시 프레스','벤치프레스','풀업','친업','덤벨 로우','복근운동','케이블 로테이션','수퍼맨']],
-  ['하체',     ['바벨 스쿼트','케틀벨 스윙','데드리프트','불가리안 스플릿 스쿼트','스쿼트','리버스 런지',
-                '힙브릿지','글루트 브릿지','클램쉘','사이드 레그 레이즈','스모 스쿼트','스텝 업','런지',
-                '서서 힙 킥백','플랭크','레그레이즈','바이시클 크런치','크런치']],
+  ['플라이오(금)', ['박스 점프','스쿼트 점프','버피','배틀로프','점핑잭','사이드 스텝 드릴','스프린트 인터벌','런닝머신','브로드 점프','제자리 높이 점프','스타 점프']],
+  ['농구훈련(목)', ['드리블','레이업','슈팅','수비 슬라이드','풋워크','1on1']],
+  ['상체(화)',    ['푸시 프레스','벤치프레스','풀업','친업','덤벨 로우','복근운동','케이블 로테이션','수퍼맨','푸시업','턱걸이','매달리기','파이크 푸시업','테이블 로우']],
+  ['하체(월)',    ['바벨 스쿼트','케틀벨 스윙','데드리프트','불가리안 스플릿 스쿼트','스쿼트','리버스 런지',
+                  '힙브릿지','글루트 브릿지','클램쉘','사이드 레그 레이즈','스모 스쿼트','스텝 업','런지',
+                  '서서 힙 킥백','플랭크','레그레이즈','바이시클 크런치','크런치','카프레이즈']],
 ];
 const SKIP_KEYWORDS = ['휴식','폼롤러','산책']; // 휴식일 항목은 이전하지 않음
 
@@ -583,7 +658,7 @@ async function migrateOldRoutines() {
       if (SKIP_KEYWORDS.some(k => it.exercise_name.includes(k))) continue;
 
       let cat;
-      if (r.day_of_week === 4) cat = '농구 훈련';
+      if (r.day_of_week === 4) cat = '농구훈련(목)';
       else if (r.day_of_week === 0) cat = '농구 경기';
       else cat = classifyByName(it.exercise_name) || '하체';
 
@@ -636,7 +711,7 @@ function toggleCatPick(cat) {
 function confirmCats() {
   if (!pickedCats.size) return;
   pickerPool = [];
-  CATEGORIES.forEach(cat => {
+  getCatNames().forEach(cat => {
     if (pickedCats.has(cat)) pickerPool.push(...(exLib[cat] ?? []));
   });
   pickedExIds = new Set(pickerPool.map(x => x.id)); // 기본 전체 선택
@@ -755,7 +830,7 @@ async function addItem(cat, name, sets, unit) {
 async function deleteItem(id) {
   try {
     await dbDelete('exercise_library', `id=eq.${id}`);
-    for (const k of CATEGORIES) {
+    for (const k of getCatNames()) {
       if (Array.isArray(exLib[k])) exLib[k] = exLib[k].filter(x => x.id !== id);
     }
     showToast('🗑 삭제됨', 'ok');
@@ -939,13 +1014,13 @@ function renderCatPickStage() {
     오늘 할 카테고리를 모두 골라주세요 (복수 선택 가능)
   </div>`;
   h += `<div class="cat-pick-grid">`;
-  CATEGORIES.forEach(cat => {
-    const cnt = exLib[cat]?.length ?? 0;
-    const sel = pickedCats.has(cat);
+  userCategories.forEach(cat => {
+    const cnt = exLib[cat.name]?.length ?? 0;
+    const sel = pickedCats.has(cat.name);
     h += `<div class="cat-chip${sel?' sel':''}${cnt===0?' empty':''}"
-      onclick="${cnt===0?'':`toggleCatPick('${cat}')`}">
-      <div class="cc-ic">${CAT_ICON[cat]}</div>
-      <div class="cc-name">${cat}</div>
+      onclick="${cnt===0?'':`toggleCatPick('${cat.name}')`}">
+      <div class="cc-ic">${cat.emoji}</div>
+      <div class="cc-name">${cat.name}</div>
       <div class="cc-cnt">${cnt}개 운동${cnt===0?' (비어있음)':''}</div>
     </div>`;
   });
@@ -1176,12 +1251,14 @@ function renderCategoryManager() {
   const el = document.getElementById('pageRoutines');
 
   let h = `<div class="day-tabs">`;
-  CATEGORIES.forEach(cat => {
-    const cnt = exLib[cat]?.length ?? 0;
-    h += `<div class="dtab${selCat===cat?' act':''}" onclick="setCat('${cat}')">
-      ${CAT_ICON[cat]} ${cat} ${cnt ? `<span style="font-size:.55rem;opacity:.65;">${cnt}</span>` : ''}
+  userCategories.forEach(cat => {
+    const cnt = exLib[cat.name]?.length ?? 0;
+    h += `<div class="dtab${selCat===cat.name?' act':''}" onclick="setCat('${cat.name}')">
+      ${cat.emoji} ${cat.name} ${cnt ? `<span style="font-size:.55rem;opacity:.65;">${cnt}</span>` : ''}
+      <span class="dtab-edit" onclick="event.stopPropagation();openEditCat('${cat.id}')">✏️</span>
     </div>`;
   });
+  h += `<div class="dtab" onclick="openAddCat()" style="color:var(--red);font-weight:900;">＋</div>`;
   h += `</div>`;
 
   const items = exLib[selCat] ?? [];
@@ -1254,6 +1331,108 @@ function renderCategoryManager() {
 
   el.innerHTML = h;
   if (addingCat === selCat) setTimeout(() => document.getElementById('afName')?.focus(), 40);
+}
+
+/* ── 카테고리 CRUD ── */
+function renderEmojiGrid() {
+  const g = document.getElementById('catEmojiGrid');
+  if (!g) return;
+  g.innerHTML = CAT_EMOJI_PRESETS.map(e =>
+    `<button class="emoji-btn${selCatEmoji===e?' sel':''}" onclick="selectEmoji('${e}')">${e}</button>`
+  ).join('');
+}
+function selectEmoji(e) {
+  selCatEmoji = e;
+  document.querySelectorAll('.emoji-btn').forEach(b => {
+    b.classList.toggle('sel', b.textContent === e);
+  });
+}
+function openAddCat() {
+  editingCatId = null;
+  selCatEmoji  = '🏋️';
+  document.getElementById('catModalTitle').textContent = '카테고리 추가';
+  document.getElementById('catNameInp').value = '';
+  document.getElementById('catDelBtn').style.display = 'none';
+  renderEmojiGrid();
+  document.getElementById('catModalOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('catNameInp')?.focus(), 80);
+}
+function openEditCat(id) {
+  const cat = userCategories.find(c => c.id === id || c.id == id);
+  if (!cat) return;
+  editingCatId = cat.id;
+  selCatEmoji  = cat.emoji || '🏋️';
+  document.getElementById('catModalTitle').textContent = '카테고리 수정';
+  document.getElementById('catNameInp').value = cat.name;
+  document.getElementById('catDelBtn').style.display = '';
+  renderEmojiGrid();
+  document.getElementById('catModalOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('catNameInp')?.focus(), 80);
+}
+function closeCatModal(e) {
+  if (e && e.target !== document.getElementById('catModalOverlay')) return;
+  document.getElementById('catModalOverlay').classList.remove('open');
+  editingCatId = null;
+}
+async function saveCat() {
+  const name = document.getElementById('catNameInp')?.value?.trim();
+  if (!name) { document.getElementById('catNameInp')?.focus(); return; }
+  const saveBtn = document.getElementById('catSaveBtn');
+  saveBtn.disabled = true; saveBtn.textContent = '저장 중…';
+  try {
+    if (editingCatId) {
+      // 수정
+      const oldCat = userCategories.find(c => c.id === editingCatId || c.id == editingCatId);
+      const oldName = oldCat?.name;
+      await dbPatch('categories', `id=eq.${editingCatId}`, { name, emoji: selCatEmoji });
+      // exercise_library 카테고리명도 동기화
+      if (oldName && oldName !== name) {
+        await dbPatch('exercise_library',
+          `profile_name=eq.${encodeURIComponent(curProfile)}&category=eq.${encodeURIComponent(oldName)}`,
+          { category: name });
+      }
+      showToast('✅ 카테고리 수정됨', 'ok');
+    } else {
+      // 추가
+      const maxOrder = userCategories.reduce((m, c) => Math.max(m, c.item_order ?? 0), -1);
+      const newCat = { id: uid(), profile_name: curProfile, name, emoji: selCatEmoji, item_order: maxOrder + 1 };
+      await dbPost('categories', newCat);
+      showToast('✅ 카테고리 추가됨', 'ok');
+    }
+    document.getElementById('catModalOverlay').classList.remove('open');
+    editingCatId = null;
+    // 재로드
+    await loadCategories();
+    await loadExerciseLibrary();
+    selCat = name;
+    renderAll();
+  } catch(e) {
+    console.error('saveCat', e);
+    showToast('❌ 저장 실패: ' + e.message, 'err', 4000);
+    saveBtn.disabled = false; saveBtn.textContent = '저장';
+  }
+}
+async function deleteCat() {
+  if (!editingCatId) return;
+  const cat = userCategories.find(c => c.id === editingCatId || c.id == editingCatId);
+  if (!cat) return;
+  if (!confirm(`"${cat.name}" 카테고리와 운동 목록을 모두 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    // exercise_library 운동 먼저 삭제
+    await dbDelete('exercise_library',
+      `profile_name=eq.${encodeURIComponent(curProfile)}&category=eq.${encodeURIComponent(cat.name)}`);
+    // 카테고리 삭제
+    await dbDelete('categories', `id=eq.${editingCatId}`);
+    showToast('🗑 카테고리 삭제됨', 'ok');
+    document.getElementById('catModalOverlay').classList.remove('open');
+    editingCatId = null;
+    await loadCategories();
+    await loadExerciseLibrary();
+    renderAll();
+  } catch(e) {
+    console.error('deleteCat', e);
+    showToast('❌ 삭제 실패: ' + e.message, 'err', 4000);
+  }
 }
 
 /* ── Toast ── */
@@ -1393,28 +1572,48 @@ const DEFAULT_POOLS = {
       { e:'레그레이즈',             s:3, u:'15회' },
     ],
     '상체(화)': [
-      { e:'푸시 프레스',            s:4, u:'6회'  },
       { e:'벤치프레스',             s:4, u:'6회'  },
-      { e:'풀업 (친업)',            s:4, u:'8회'  },
-      { e:'덤벨 로우',              s:3, u:'12회' },
-      { e:'복근운동 (크런치)',       s:3, u:'20회' },
+      { e:'인클라인 벤치프레스',    s:3, u:'8회'  },
+      { e:'바벨 로우',              s:4, u:'8회'  },
+      { e:'풀업 (친업)',            s:4, u:'최대'  },
+      { e:'밀리터리 프레스',        s:3, u:'8회'  },
+      { e:'덤벨 래터럴 레이즈',    s:3, u:'15회' },
+      { e:'딥스',                   s:3, u:'10회' },
+      { e:'페이스풀',               s:3, u:'15회' },
+      { e:'해머컬',                 s:3, u:'12회' },
       { e:'케이블 로테이션',        s:3, u:'15회' },
     ],
     '플라이오(금)': [
       { e:'박스 점프',              s:4, u:'8회'  },
-      { e:'스쿼트 점프',            s:3, u:'10회' },
-      { e:'버피 점프',              s:3, u:'10회' },
+      { e:'뎁스 점프',              s:3, u:'6회'  },
+      { e:'스쿼트 점프',            s:4, u:'10회' },
+      { e:'브로드 점프',            s:3, u:'6회'  },
+      { e:'래터럴 바운드',          s:3, u:'8회'  },
+      { e:'스플릿 점프 (런지 점프)',s:3, u:'8회'  },
+      { e:'싱글레그 홉',            s:3, u:'8회'  },
       { e:'버피',                   s:3, u:'10회' },
       { e:'배틀로프',               s:3, u:'30초' },
-      { e:'사이드 스텝 드릴',       s:3, u:'2분'  },
     ],
-    '농구 훈련': [
-      { e:'동적 스트레칭 (워밍업)', s:1, u:'8분'  },
-      { e:'줄넘기 (활성화)',        s:2, u:'3분'  },
-      { e:'드리블 핸들링 드릴',     s:2, u:'5분'  },
-      { e:'슈팅 웜업 (캐치&슛)',   s:3, u:'15회' },
-      { e:'레이업 웜업',            s:2, u:'20회' },
-      { e:'쿨다운 스트레칭',        s:1, u:'10분' },
+    '펑션트레이닝(수)': [
+      { e:'파워 클린',              s:4, u:'5회'  },
+      { e:'터키시 겟업',            s:3, u:'3회'  },
+      { e:'케틀벨 윈드밀',         s:3, u:'8회'  },
+      { e:'메디신볼 슬램',          s:3, u:'10회' },
+      { e:'케이블 우드찹',          s:3, u:'12회' },
+      { e:'팜투엘보우 플랭크',      s:3, u:'30초' },
+      { e:'러시안 트위스트',        s:3, u:'20회' },
+      { e:'사이드 런지',            s:3, u:'10회' },
+      { e:'베어 크롤',              s:3, u:'20m'  },
+    ],
+    '농구훈련(목)': [
+      { e:'줄넘기 (워밍업)',        s:2, u:'5분'  },
+      { e:'드리블 핸들링 드릴',     s:3, u:'5분'  },
+      { e:'레이업 드릴',            s:3, u:'20회' },
+      { e:'미드레인지 슈팅',        s:3, u:'20회' },
+      { e:'3점 슈팅',               s:3, u:'30회' },
+      { e:'수비 슬라이드',          s:3, u:'1분'  },
+      { e:'풋워크 드릴',            s:3, u:'3분'  },
+      { e:'1on1',                   s:3, u:'5분'  },
     ],
   },
   '미희': {
@@ -1441,7 +1640,7 @@ const DEFAULT_POOLS = {
       { e:'무릎 높이 달리기',        s:3, u:'30초' },
       { e:'스쿼트 점프 (저충격)',    s:3, u:'10회' },
     ],
-    '농구 훈련': [],
+    '농구훈련(목)': [],
   },
   '채원': {
     '하체(월)': [
@@ -1467,7 +1666,7 @@ const DEFAULT_POOLS = {
       { e:'스타 점프',               s:3, u:'10회' },
       { e:'배틀로프 (케틀벨 스윙)',  s:3, u:'20회' },
     ],
-    '농구 훈련': [
+    '농구훈련(목)': [
       { e:'줄넘기 (워밍업)',         s:2, u:'3분'  },
       { e:'코브라 스트레칭',         s:3, u:'30초' },  // 척추 이완·신장
       { e:'고양이·소 스트레칭',      s:3, u:'10회' },  // 척추 유연성
